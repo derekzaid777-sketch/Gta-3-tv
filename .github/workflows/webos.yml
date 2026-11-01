@@ -1,0 +1,82 @@
+name: Build re3 for webOS ARM
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository recursively
+        uses: actions/checkout@v4
+        with:
+          repository: 'GTAmodding/re3'
+          submodules: recursive
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++-arm-linux-gnueabihf gcc-arm-linux-gnueabihf libopenal-dev pkg-config
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install webOS CLI silently
+        run: |
+          npm install -g @webosose/cli --silent
+
+      - name: Configure CMake for ARM Linux
+        run: |
+          mkdir build && cd build
+          cmake .. \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=arm \
+            -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc \
+            -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ \
+            -DLIBRW_PLATFORM=GL3 \
+            -DRE3_PLATFORM=LINUX \
+            -DRE3_AUDIO=OAL
+
+      - name: Compile Binary
+        run: |
+          cmake --build build -j$(nproc)
+
+      - name: Package webOS Application (.ipk)
+        run: |
+          mkdir -p webos-app
+          
+          # Crear archivo appinfo.json requerido por webOS
+          cat << 'EOF' > webos-app/appinfo.json
+          {
+            "id": "com.re3.gta3",
+            "version": "1.0.0",
+            "vendor": "Homebrew Community",
+            "type": "native",
+            "main": "re3",
+            "title": "GTA III",
+            "icon": "icon.png",
+            "resolution": "1920x1080"
+          }
+          EOF
+
+          # Copiar el binario compilado al directorio de la app y otorgar permisos de ejecución
+          if [ -f "build/src/re3" ]; then
+            cp build/src/re3 webos-app/re3
+          else
+            cp build/re3 webos-app/re3
+          fi
+          chmod +x webos-app/re3
+
+          # Generar el archivo .ipk utilizando ares-package
+          ares-package webos-app
+
+      - name: Upload IPK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: re3-webos-arm
+          path: '*.ipk'
